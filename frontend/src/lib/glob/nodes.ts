@@ -208,15 +208,15 @@ void main() {
   // Breathing is minimal — driven by position buffer, not shader
   float breathe = sin(uTime * 0.8 + aPhase * 6.2831) * 0.15 + 0.85;
   
-  // Activity boosts brightness significantly
-  float activityBoost = 1.0 + aActivity * 3.0;
+  // INACTIVE nodes are tiny and dim. ACTIVE nodes glow.
+  float activityBoost = 0.15 + aActivity * 5.0; // inactive=0.15, active=5.15
   vBrightness = aBrightness * breathe * uBrightness * activityBoost;
   
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   
-  // Size scales with activity — active nodes are bigger
-  float sizeBase = 2.0 + aActivity * 3.0;
-  gl_PointSize = (sizeBase + vBrightness * 1.5) * (300.0 / -mvPosition.z);
+  // INACTIVE nodes are tiny dots. ACTIVE nodes are larger.
+  float sizeBase = 1.5 + aActivity * 4.0;
+  gl_PointSize = (sizeBase) * (300.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;

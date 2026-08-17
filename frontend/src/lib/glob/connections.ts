@@ -5,7 +5,7 @@ import type { NeuralNode } from './nodes';
 const MIN_CONNECTIONS_PER_NODE = 3;
 const MAX_CONNECTIONS_PER_NODE = 6;
 const ACTIVITY_DECAY = 0.94;
-const ACTIVITY_BOOST = 2.5;
+const ACTIVITY_BOOST = 1.5; // Active connections glow, but not too much
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface NeuralConnection {
@@ -80,7 +80,7 @@ export function buildGraph(nodes: NeuralNode[]): NeuralConnection[] {
       if (!edgeSet.has(edgeKey)) {
         edgeSet.add(edgeKey);
 
-        const baseIntensity = 0.1 + Math.random() * 0.3; // Dim baseline
+        const baseIntensity = 0.03 + Math.random() * 0.09; // Very dim by default — only active connections glow
         connections.push({
           source: node.id,
           target: neighborId,

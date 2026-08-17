@@ -19,6 +19,8 @@
   import { createSparkSystem, updateSparks, type SparkSystem } from './sparks';
   import { createAmbientParticles, updateAmbient, type AmbientSystem } from './ambient';
 
+  let { isSpeaking = false }: { isSpeaking?: boolean } = $props();
+
   let container: HTMLDivElement;
   let animationId: number;
 
@@ -83,7 +85,7 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 0.8; // Dim overall — only active elements should glow
     container.appendChild(renderer.domElement);
 
     // Post-processing
@@ -92,9 +94,9 @@
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.3,   // strength — low, structure first
-      0.2,   // radius — tight
-      0.5    // threshold — only brightest bloom
+      0.2,   // strength — very low. Only firing neurons bloom.
+      0.15,  // radius — tight
+      0.6    // threshold — high. Only the brightest elements bloom.
     );
     composer.addPass(bloomPass);
 
@@ -177,6 +179,12 @@
 
     // Update node shader time
     nodeMaterial.uniforms.uTime.value = elapsed;
+
+    // Speaking state: shift node color to warm amber
+    const targetColor = isSpeaking
+      ? new THREE.Color(0xddaa44) // Warm amber when speaking
+      : COLORS.node; // Electric blue when idle
+    nodeMaterial.uniforms.uColor.value.lerp(targetColor, 0.05);
 
     // Update connection shader
     connectionSystem.material.uniforms.uTime.value = elapsed;
