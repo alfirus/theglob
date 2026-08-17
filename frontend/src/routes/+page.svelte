@@ -9,40 +9,51 @@
   let messages: Message[] = $state([]);
   let isThinking = $state(false);
   let isSpeaking = $state(false);
+  let currentAudio: HTMLAudioElement | null = null;
 
   function handleGlobeClick() {
     showInput = true;
   }
 
-  function speak(text: string) {
-    if (!('speechSynthesis' in window)) return;
+  async function speak(text: string) {
+    // Stop any ongoing speech
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    isSpeaking = true;
 
-    // Cancel any ongoing speech
-    speechSynthesis.cancel();
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+      if (!response.ok) throw new Error('TTS failed');
 
-    // Try to find a female voice
-    const voices = speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.name.includes('Samantha') ||
-      v.name.includes('Karen') ||
-      v.name.includes('Victoria') ||
-      v.name.includes('Google UK English Female') ||
-      v.name.includes('Google US English') ||
-      v.name.includes('Microsoft Zira') ||
-      v.name.includes('Microsoft Hazel') ||
-      (v.lang.startsWith('en') && v.name.toLowerCase().includes('female'))
-    ) || voices.find(v => v.lang.startsWith('en'));
-    if (preferred) utterance.voice = preferred;
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
 
-    utterance.onstart = () => { isSpeaking = true; };
-    utterance.onend = () => { isSpeaking = false; };
-    utterance.onerror = () => { isSpeaking = false; };
+      audio.onended = () => {
+        isSpeaking = false;
+        currentAudio = null;
+        URL.revokeObjectURL(url);
+      };
 
-    speechSynthesis.speak(utterance);
+      audio.onerror = () => {
+        isSpeaking = false;
+        currentAudio = null;
+        URL.revokeObjectURL(url);
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error('Piper TTS error:', err);
+      isSpeaking = false;
+    }
   }
 
   async function handleSend(e: CustomEvent<string>) {
@@ -51,7 +62,11 @@
     isThinking = true;
 
     // Stop any ongoing speech
-    speechSynthesis.cancel();
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+      isSpeaking = false;
+    }
 
     try {
       const response = await fetch('/api/chat', {
@@ -60,9 +75,7 @@
         body: JSON.stringify({ message: text })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
@@ -94,7 +107,7 @@
         }
       }
 
-      // Speak the full response after streaming completes
+      // Speak with Piper TTS after streaming completes
       if (assistantText) {
         speak(assistantText);
       }
@@ -170,6 +183,23 @@
     padding: 16px;
     backdrop-filter: blur(12px);
     box-shadow: 0 0 30px rgba(68, 136, 255, 0.08);
+  }
+
+  .chat-card :global(::-webkit-scrollbar) {
+    width: 4px;
+  }
+
+  .chat-card :global(::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+
+  .chat-card :global(::-webkit-scrollbar-thumb) {
+    background: rgba(68, 136, 255, 0.2);
+    border-radius: 4px;
+  }
+
+  .chat-card :global(::-webkit-scrollbar-thumb:hover) {
+    background: rgba(68, 136, 255, 0.4);
   }
 
   .thinking {
