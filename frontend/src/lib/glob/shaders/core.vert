@@ -1,20 +1,12 @@
-// Vertex shader for central core glow
+// Vertex shader for core pulse — used for heartbeat animation reference
 uniform float uTime;
 uniform float uPulse;
 
-varying vec3 vNormal;
-varying vec3 vViewDir;
+varying float vPulse;
 
 void main() {
-  vNormal = normalize(normalMatrix * normal);
+  vPulse = uPulse;
   
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
-  vViewDir = normalize(cameraPosition - worldPos.xyz);
-  
-  // Heartbeat pulse: fast rise, slow fall
-  float heartbeat = pow(max(0.0, sin(uTime * 3.927)), 4.0); // ~0.8s period
-  float scale = 1.0 + heartbeat * uPulse * 0.08;
-  
-  vec3 pos = position * scale;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
 }

@@ -1,59 +1,48 @@
 import * as THREE from 'three';
-import type { Connection } from './connections';
+import type { NeuralSignal } from './neuralActivity';
 
-const MAX_SPARKS = 20; // More sparks for electric feel
+// ─── Configuration ───────────────────────────────────────────────────────────
+const MAX_SPARKS = 8; // Limited simultaneous sparks
 
-export interface Spark {
-  connectionIdx: number;
-  progress: number;
-  speed: number;
-  active: boolean;
-  spawnTime: number;
-}
-
+// ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface SparkSystem {
   points: THREE.Points;
   material: THREE.ShaderMaterial;
-  sparks: Spark[];
+  positions: Float32Array;
+  progresses: Float32Array;
+  actives: Float32Array;
   time: number;
 }
 
-// Vertex shader for sparks
+// ─── Shaders ─────────────────────────────────────────────────────────────────
 export const sparkVertexShader = `
 uniform float uTime;
-uniform float uPointScale;
 
 attribute float aProgress;
-attribute float aSpawnTime;
 attribute float aActive;
 
 varying float vProgress;
-varying float vAge;
+varying float vActive;
 
 void main() {
   vProgress = aProgress;
-  
-  float age = uTime - aSpawnTime;
-  vAge = age;
-  
-  float lifeFade = 1.0 - smoothstep(0.3, 0.5, age);
-  float isActive = aActive;
+  vActive = aActive;
   
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   
+  // Size pulses at midpoint of travel
   float sizeFactor = sin(aProgress * 3.14159) * 2.0 + 2.0;
-  gl_PointSize = sizeFactor * lifeFade * isActive * uPointScale * (300.0 / -mvPosition.z);
+  gl_PointSize = sizeFactor * aActive * (300.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
-// Fragment shader for sparks — bright electric action potentials
 export const sparkFragmentShader = `
 uniform vec3 uCoreColor;
 uniform vec3 uHaloColor;
 
 varying float vProgress;
-varying float vAge;
+varying float vActive;
 
 void main() {
   vec2 uv = gl_PointCoord - vec2(0.5);
@@ -73,8 +62,8 @@ void main() {
   float outerGlow = 1.0 - smoothstep(0.15, 0.5, dist);
   outerGlow = pow(outerGlow, 3.0) * 0.5;
   
-  // Life fade
-  float lifeFade = smoothstep(0.0, 0.1, vAge) * (1.0 - smoothstep(0.3, 0.6, vAge));
+  // Life fade — quick in, slow out
+  float lifeFade = smoothstep(0.0, 0.1, vActive) * (1.0 - smoothstep(0.3, 0.6, vActive));
   
   vec3 color = mix(uHaloColor * 1.5, uCoreColor * 3.0, core);
   float alpha = (core * 1.5 + halo * 0.8 + outerGlow * 0.3) * lifeFade;
@@ -83,21 +72,19 @@ void main() {
 }
 `;
 
+// ─── Create spark system ────────────────────────────────────────────────────
 export function createSparkSystem(
   coreColor: THREE.Color,
   haloColor: THREE.Color
 ): SparkSystem {
-  const maxSparks = MAX_SPARKS;
-  const positions = new Float32Array(maxSparks * 3);
-  const progressAttr = new Float32Array(maxSparks);
-  const spawnTimeAttr = new Float32Array(maxSparks);
-  const activeAttr = new Float32Array(maxSparks);
+  const positions = new Float32Array(MAX_SPARKS * 3);
+  const progresses = new Float32Array(MAX_SPARKS);
+  const actives = new Float32Array(MAX_SPARKS);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('aProgress', new THREE.BufferAttribute(progressAttr, 1));
-  geometry.setAttribute('aSpawnTime', new THREE.BufferAttribute(spawnTimeAttr, 1));
-  geometry.setAttribute('aActive', new THREE.BufferAttribute(activeAttr, 1));
+  geometry.setAttribute('aProgress', new THREE.BufferAttribute(progresses, 1));
+  geometry.setAttribute('aActive', new THREE.BufferAttribute(actives, 1));
 
   const material = new THREE.ShaderMaterial({
     vertexShader: sparkVertexShader,
@@ -105,8 +92,7 @@ export function createSparkSystem(
     uniforms: {
       uTime: { value: 0 },
       uCoreColor: { value: coreColor },
-      uHaloColor: { value: haloColor },
-      uPointScale: { value: 1.0 }
+      uHaloColor: { value: haloColor }
     },
     transparent: true,
     blending: THREE.AdditiveBlending,
@@ -115,87 +101,93 @@ export function createSparkSystem(
 
   const points = new THREE.Points(geometry, material);
 
-  const sparks: Spark[] = [];
-  for (let i = 0; i < maxSparks; i++) {
-    sparks.push({
-      connectionIdx: -1,
-      progress: 0,
-      speed: 1.0,
-      active: false,
-      spawnTime: 0
-    });
-  }
-
-  return { points, material, sparks, time: 0 };
+  return {
+    points,
+    material,
+    positions,
+    progresses,
+    actives,
+    time: 0
+  };
 }
 
+// ─── Update sparks from neural signals ──────────────────────────────────────
 export function updateSparks(
   system: SparkSystem,
-  connections: Connection[],
+  signals: NeuralSignal[],
   nodePositions: Float32Array,
-  deltaTime: number,
-  spawnInterval: number
+  nodes: { id: number; position: THREE.Vector3 }[],
+  deltaTime: number
 ): void {
   system.time += deltaTime;
 
-  const posAttr = system.points.geometry.getAttribute('position') as THREE.BufferAttribute;
-  const progAttr = system.points.geometry.getAttribute('aProgress') as THREE.BufferAttribute;
-  const spawnAttr = system.points.geometry.getAttribute('aSpawnTime') as THREE.BufferAttribute;
-  const activeAttr = system.points.geometry.getAttribute('aActive') as THREE.BufferAttribute;
+  const posAttr = system.positions;
+  const progAttr = system.progresses;
+  const activeAttr = system.actives;
 
-  // Update existing sparks
-  for (let i = 0; i < system.sparks.length; i++) {
-    const spark = system.sparks[i];
-
-    if (spark.active) {
-      spark.progress += deltaTime * spark.speed;
-
-      if (spark.progress >= 1.0) {
-        spark.active = false;
-        activeAttr.setX(i, 0);
-        continue;
-      }
-
-      // Interpolate position along connection
-      const conn = connections[spark.connectionIdx];
-      if (conn) {
-        const si = conn.startIdx * 3;
-        const ei = conn.endIdx * 3;
-
-        const t = spark.progress;
-        posAttr.setXYZ(
-          i,
-          nodePositions[si] * (1 - t) + nodePositions[ei] * t,
-          nodePositions[si + 1] * (1 - t) + nodePositions[ei + 1] * t,
-          nodePositions[si + 2] * (1 - t) + nodePositions[ei + 2] * t
-        );
-        progAttr.setX(i, spark.progress);
-        spawnAttr.setX(i, spark.spawnTime);
-      }
-    }
+  // Clear all spark positions
+  for (let i = 0; i < MAX_SPARKS; i++) {
+    posAttr[i * 3] = 0;
+    posAttr[i * 3 + 1] = 0;
+    posAttr[i * 3 + 2] = 0;
+    progAttr[i] = 0;
+    activeAttr[i] = 0;
   }
 
-  // Spawn new sparks at random intervals
-  if (connections.length > 0 && Math.random() < deltaTime / spawnInterval) {
-    // Find an inactive slot
-    for (let i = 0; i < system.sparks.length; i++) {
-      if (!system.sparks[i].active) {
-        const connIdx = Math.floor(Math.random() * connections.length);
-        system.sparks[i] = {
-          connectionIdx: connIdx,
-          progress: 0,
-          speed: 1.5 + Math.random() * 1.5,
-          active: true,
-          spawnTime: system.time
-        };
-        activeAttr.setX(i, 1);
-        break;
-      }
-    }
+  // Map active signals to spark slots
+  let sparkIdx = 0;
+  for (let i = 0; i < signals.length && sparkIdx < MAX_SPARKS; i++) {
+    const signal = signals[i];
+    if (!signal.active || signal.path.length === 0) continue;
+
+    // Get current connection in path
+    const conn = signal.path[signal.connectionIndex];
+    if (!conn) continue;
+
+    // Get source and target positions from node positions buffer
+    const sourceIdx = conn.source * 3;
+    const targetIdx = conn.target * 3;
+
+    const sx = nodePositions[sourceIdx];
+    const sy = nodePositions[sourceIdx + 1];
+    const sz = nodePositions[sourceIdx + 2];
+
+    const tx = nodePositions[targetIdx];
+    const ty = nodePositions[targetIdx + 1];
+    const tz = nodePositions[targetIdx + 2];
+
+    // Interpolate position along connection
+    const t = signal.progress;
+    posAttr[sparkIdx * 3] = sx + (tx - sx) * t;
+    posAttr[sparkIdx * 3 + 1] = sy + (ty - sy) * t;
+    posAttr[sparkIdx * 3 + 2] = sz + (tz - sz) * t;
+
+    // Progress along current connection
+    progAttr[sparkIdx] = signal.progress;
+
+    // Active state (fades out near end of path)
+    const pathProgress = (signal.connectionIndex + signal.progress) / signal.path.length;
+    activeAttr[sparkIdx] = 1.0 - pathProgress * 0.3;
+
+    sparkIdx++;
   }
 
-  posAttr.needsUpdate = true;
-  progAttr.needsUpdate = true;
-  spawnAttr.needsUpdate = true;
-  activeAttr.needsUpdate = true;
+  // Mark unused slots as inactive
+  for (let i = sparkIdx; i < MAX_SPARKS; i++) {
+    activeAttr[i] = 0;
+  }
+
+  // Update GPU buffers
+  const posBuffer = system.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+  const progBuffer = system.points.geometry.getAttribute('aProgress') as THREE.BufferAttribute;
+  const activeBuffer = system.points.geometry.getAttribute('aActive') as THREE.BufferAttribute;
+
+  posBuffer.array.set(posAttr);
+  posBuffer.needsUpdate = true;
+
+  progBuffer.array.set(progAttr);
+  progBuffer.needsUpdate = true;
+
+  activeBuffer.array.set(activeAttr);
+  activeBuffer.needsUpdate = true;
 }

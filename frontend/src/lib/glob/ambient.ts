@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 
-const AMBIENT_COUNT = 50;
+// ─── Configuration ───────────────────────────────────────────────────────────
+const AMBIENT_COUNT = 40;  // Very sparse — depth cues only
 const DRIFT_RADIUS = 2.5;
+const VELOCITY_SCALE = 0.02; // Extremely slow movement
 
+// ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface AmbientSystem {
   points: THREE.Points;
   material: THREE.PointsMaterial;
   velocities: Float32Array;
 }
 
+// ─── Create ambient particles ───────────────────────────────────────────────
 export function createAmbientParticles(color: THREE.Color): AmbientSystem {
   const positions = new Float32Array(AMBIENT_COUNT * 3);
   const velocities = new Float32Array(AMBIENT_COUNT * 3);
@@ -20,9 +24,9 @@ export function createAmbientParticles(color: THREE.Color): AmbientSystem {
     positions[i * 3 + 2] = (Math.random() - 0.5) * DRIFT_RADIUS * 2;
 
     // Very slow drift velocities
-    velocities[i * 3] = (Math.random() - 0.5) * 0.002;
-    velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.002;
-    velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.002;
+    velocities[i * 3] = (Math.random() - 0.5) * 0.001 * VELOCITY_SCALE;
+    velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.001 * VELOCITY_SCALE;
+    velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.001 * VELOCITY_SCALE;
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -30,9 +34,9 @@ export function createAmbientParticles(color: THREE.Color): AmbientSystem {
 
   const material = new THREE.PointsMaterial({
     color: color,
-    size: 0.015,
+    size: 0.01,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.15, // Very dim
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true
@@ -43,6 +47,7 @@ export function createAmbientParticles(color: THREE.Color): AmbientSystem {
   return { points, material, velocities };
 }
 
+// ─── Update ambient particles ───────────────────────────────────────────────
 export function updateAmbient(system: AmbientSystem, deltaTime: number): void {
   const posAttr = system.points.geometry.getAttribute('position') as THREE.BufferAttribute;
 
@@ -63,15 +68,15 @@ export function updateAmbient(system: AmbientSystem, deltaTime: number): void {
       }
     }
 
-    // Slight random drift change
-    if (Math.random() < 0.01) {
-      system.velocities[ix] += (Math.random() - 0.5) * 0.0005;
-      system.velocities[iy] += (Math.random() - 0.5) * 0.0005;
-      system.velocities[iz] += (Math.random() - 0.5) * 0.0005;
+    // Very rare drift change
+    if (Math.random() < 0.005) {
+      system.velocities[ix] += (Math.random() - 0.5) * 0.0001 * VELOCITY_SCALE;
+      system.velocities[iy] += (Math.random() - 0.5) * 0.0001 * VELOCITY_SCALE;
+      system.velocities[iz] += (Math.random() - 0.5) * 0.0001 * VELOCITY_SCALE;
 
       // Clamp velocity
       for (const axis of [ix, iy, iz]) {
-        system.velocities[axis] = Math.max(-0.005, Math.min(0.005, system.velocities[axis]));
+        system.velocities[axis] = Math.max(-0.001, Math.min(0.001, system.velocities[axis]));
       }
     }
   }

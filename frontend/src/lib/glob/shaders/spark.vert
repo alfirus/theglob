@@ -2,25 +2,19 @@
 uniform float uTime;
 
 attribute float aProgress;
-attribute float aSpawnTime;
+attribute float aActive;
 
 varying float vProgress;
-varying float vAge;
+varying float vActive;
 
 void main() {
   vProgress = aProgress;
-  
-  // Calculate age of this spark
-  float age = uTime - aSpawnTime;
-  vAge = age;
-  
-  // Fade out near end of life
-  float lifeFade = 1.0 - smoothstep(0.3, 0.5, age);
+  vActive = aActive;
   
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   
-  // Size varies with progress (brightest at midpoint)
+  // Size pulses at midpoint of travel
   float sizeFactor = sin(aProgress * 3.14159) * 2.0 + 2.0;
-  gl_PointSize = sizeFactor * lifeFade * (300.0 / -mvPosition.z);
+  gl_PointSize = sizeFactor * aActive * (300.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }

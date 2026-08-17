@@ -1,8 +1,40 @@
 import * as THREE from 'three';
 
-// Fibonacci sphere distribution for ~300 neural nodes
-export function fibonacciSphere(n: number, radius = 1.0): [number, number, number][] {
-  const points: [number, number, number][] = [];
+// ─── Configuration ───────────────────────────────────────────────────────────
+const CLUSTER_COUNT = 12;
+const NODES_PER_CLUSTER = 25;
+const CORE_NODE_COUNT = 30;
+const SPHERE_RADIUS = 1.0;
+const CORE_RADIUS = 0.12;
+const CLUSTER_SPREAD = 0.18; // How spread out each cluster is
+const CLUSTER_JITTER = 0.06; // Random jitter within cluster
+
+export const TOTAL_NODE_COUNT = CLUSTER_COUNT * NODES_PER_CLUSTER + CORE_NODE_COUNT; // 330
+
+// ─── Interfaces ──────────────────────────────────────────────────────────────
+export interface NeuralNode {
+  id: number;
+  position: THREE.Vector3;       // Current position (breathing modifies this)
+  basePosition: THREE.Vector3;   // Original position (never changes)
+  cluster: number;               // Which cluster this node belongs to (-1 = core)
+  importance: number;            // 0-1, determines size/brightness
+  activity: number;              // 0-1, driven by neuralActivity.ts
+  phase: number;                 // For breathing animation
+  isCore: boolean;               // True for center nodes
+}
+
+export interface NodeSystem {
+  nodes: NeuralNode[];
+  positions: Float32Array;       // Flat position buffer for GPU
+  brightnesses: Float32Array;    // Flat brightness buffer for GPU
+  activities: Float32Array;      // Flat activity buffer for GPU
+  phases: Float32Array;          // Flat phase buffer for GPU
+  count: number;
+}
+
+// ─── Fibonacci Sphere (for cluster center positions) ─────────────────────────
+function fibonacciSphere(n: number, radius: number): THREE.Vector3[] {
+  const points: THREE.Vector3[] = [];
   const goldenRatio = (1 + Math.sqrt(5)) / 2;
 
   for (let i = 0; i < n; i++) {
@@ -13,80 +45,189 @@ export function fibonacciSphere(n: number, radius = 1.0): [number, number, numbe
     const y = radius * Math.sin(phi) * Math.sin(theta);
     const z = radius * Math.cos(phi);
 
-    points.push([x, y, z]);
+    points.push(new THREE.Vector3(x, y, z));
   }
 
   return points;
 }
 
-export interface NodeData {
-  positions: Float32Array;
-  phases: Float32Array;
-  brightnesses: Float32Array;
-  count: number;
-}
+// ─── Node Generation ─────────────────────────────────────────────────────────
+export function createNodeSystem(): NodeSystem {
+  const nodes: NeuralNode[] = [];
+  let id = 0;
 
-export function createNodeData(count = 300): NodeData {
-  const points = fibonacciSphere(count);
-  const positions = new Float32Array(count * 3);
-  const phases = new Float32Array(count);
-  const brightnesses = new Float32Array(count);
+  // 1. Generate cluster center positions using fibonacci sphere
+  const clusterCenters = fibonacciSphere(CLUSTER_COUNT, SPHERE_RADIUS);
 
-  for (let i = 0; i < count; i++) {
-    const [x, y, z] = points[i];
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
+  // 2. Generate nodes within each cluster
+  for (let c = 0; c < CLUSTER_COUNT; c++) {
+    const center = clusterCenters[c];
 
-    phases[i] = Math.random();
-    brightnesses[i] = 0.5 + Math.random() * 0.5;
+    for (let n = 0; n < NODES_PER_CLUSTER; n++) {
+      // Random position within cluster spread
+      const offset = new THREE.Vector3(
+        (Math.random() - 0.5) * CLUSTER_SPREAD * 2,
+        (Math.random() - 0.5) * CLUSTER_SPREAD * 2,
+        (Math.random() - 0.5) * CLUSTER_SPREAD * 2
+      );
+
+      // Add small jitter
+      offset.x += (Math.random() - 0.5) * CLUSTER_JITTER;
+      offset.y += (Math.random() - 0.5) * CLUSTER_JITTER;
+      offset.z += (Math.random() - 0.5) * CLUSTER_JITTER;
+
+      const basePos = center.clone().add(offset);
+
+      // Project back onto sphere surface (keep it on the globe)
+      basePos.normalize().multiplyScalar(SPHERE_RADIUS);
+
+      // Add slight depth variation (0.92 to 1.08)
+      const depthVar = 0.92 + Math.random() * 0.16;
+      basePos.multiplyScalar(depthVar);
+
+      const importance = 0.3 + Math.random() * 0.7; // Random importance
+      const phase = Math.random() * Math.PI * 2;
+
+      nodes.push({
+        id,
+        position: basePos.clone(),
+        basePosition: basePos.clone(),
+        cluster: c,
+        importance,
+        activity: 0,
+        phase,
+        isCore: false
+      });
+
+      id++;
+    }
   }
 
-  return { positions, phases, brightnesses, count };
+  // 3. Generate core nodes at center
+  const coreCenter = new THREE.Vector3(0, 0, 0);
+  for (let n = 0; n < CORE_NODE_COUNT; n++) {
+    // Random position within core radius
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = Math.random() * CORE_RADIUS;
+
+    const basePos = new THREE.Vector3(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.sin(phi) * Math.sin(theta),
+      r * Math.cos(phi)
+    );
+
+    const importance = 0.7 + Math.random() * 0.3; // Core nodes are important
+    const phase = Math.random() * Math.PI * 2;
+
+    nodes.push({
+      id,
+      position: basePos.clone(),
+      basePosition: basePos.clone(),
+      cluster: -1, // Core cluster
+      importance,
+      activity: 0.2 + Math.random() * 0.3, // Core starts somewhat active
+      phase,
+      isCore: true
+    });
+
+    id++;
+  }
+
+  // 4. Build GPU buffers
+  const count = nodes.length;
+  const positions = new Float32Array(count * 3);
+  const brightnesses = new Float32Array(count);
+  const activities = new Float32Array(count);
+  const phases = new Float32Array(count);
+
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i];
+    positions[i * 3] = node.position.x;
+    positions[i * 3 + 1] = node.position.y;
+    positions[i * 3 + 2] = node.position.z;
+    brightnesses[i] = node.importance;
+    activities[i] = node.activity;
+    phases[i] = node.phase;
+  }
+
+  return { nodes, positions, brightnesses, activities, phases, count };
 }
 
-export function createNodeGeometry(data: NodeData): THREE.BufferGeometry {
+// ─── Update (breathing animation — minimal) ──────────────────────────────────
+export function updateNodes(system: NodeSystem, time: number): void {
+  const posAttr = system.positions;
+  const actAttr = system.activities;
+
+  for (let i = 0; i < system.count; i++) {
+    const node = system.nodes[i];
+
+    // Minimal breathing — NOT position perturbation
+    const breathing = Math.sin(time * 0.8 + node.phase) * 0.003;
+    node.position.copy(node.basePosition).multiplyScalar(1 + breathing);
+
+    // Update GPU buffers
+    posAttr[i * 3] = node.position.x;
+    posAttr[i * 3 + 1] = node.position.y;
+    posAttr[i * 3 + 2] = node.position.z;
+
+    // Activity drives brightness
+    actAttr[i] = node.activity;
+  }
+}
+
+// ─── Geometry Creation ───────────────────────────────────────────────────────
+export function createNodeGeometry(system: NodeSystem): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
 
-  geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-  geometry.setAttribute('aPhase', new THREE.BufferAttribute(data.phases, 1));
-  geometry.setAttribute('aBrightness', new THREE.BufferAttribute(data.brightnesses, 1));
+  geometry.setAttribute('position', new THREE.BufferAttribute(system.positions, 3));
+  geometry.setAttribute('aPhase', new THREE.BufferAttribute(system.phases, 1));
+  geometry.setAttribute('aBrightness', new THREE.BufferAttribute(system.brightnesses, 1));
+  geometry.setAttribute('aActivity', new THREE.BufferAttribute(system.activities, 1));
 
   return geometry;
 }
 
-// Vertex shader source for nodes — tight electric points
+// ─── Shaders ─────────────────────────────────────────────────────────────────
 export const nodeVertexShader = `
 uniform float uTime;
 uniform float uBrightness;
 
 attribute float aPhase;
 attribute float aBrightness;
+attribute float aActivity;
 
 varying float vBrightness;
 varying float vPhase;
+varying float vActivity;
 
 void main() {
   vPhase = aPhase;
+  vActivity = aActivity;
   
+  // Breathing is minimal — driven by position buffer, not shader
   float breathe = sin(uTime * 0.8 + aPhase * 6.2831) * 0.15 + 0.85;
-  vBrightness = aBrightness * breathe * uBrightness;
+  
+  // Activity boosts brightness significantly
+  float activityBoost = 1.0 + aActivity * 3.0;
+  vBrightness = aBrightness * breathe * uBrightness * activityBoost;
   
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   
-  // Smaller, tighter nodes
-  gl_PointSize = (3.0 + vBrightness * 2.0) * (300.0 / -mvPosition.z);
+  // Size scales with activity — active nodes are bigger
+  float sizeBase = 2.0 + aActivity * 3.0;
+  gl_PointSize = (sizeBase + vBrightness * 1.5) * (300.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
-// Fragment shader source for nodes — sharp electric points (NO soft gas)
 export const nodeFragmentShader = `
 uniform vec3 uColor;
 uniform float uTime;
 
 varying float vBrightness;
 varying float vPhase;
+varying float vActivity;
 
 void main() {
   vec2 uv = gl_PointCoord - vec2(0.5);
@@ -94,15 +235,12 @@ void main() {
   
   if (dist > 0.5) discard;
   
-  // SHARP core — almost a star, not a soft blob
-  float core = pow(1.0 - dist * 2.0, 8.0);
+  // Tight falloff — like the spec: · ●● · pattern
+  float core = smoothstep(0.16, 0.0, dist);
+  float halo = smoothstep(0.30, 0.12, dist);
+  float intensity = core + halo * 0.2;
   
-  // Tiny glow ring (very tight)
-  float glow = exp(-dist * 12.0) * 0.6;
-  
-  float intensity = core + glow;
-  
-  // White-hot center, colored edge
+  // White-hot core for active nodes, colored for resting
   vec3 coreColor = vec3(1.0, 1.0, 1.0);
   vec3 edgeColor = uColor * 1.2;
   vec3 color = mix(edgeColor, coreColor, core);
@@ -111,6 +249,9 @@ void main() {
   float colorShift = sin(uTime * 0.5 + vPhase * 6.28) * 0.1;
   color.r += colorShift;
   color.b -= colorShift * 0.5;
+  
+  // Activity makes nodes brighter and more white
+  color = mix(color, vec3(1.0), vActivity * 0.4);
   
   gl_FragColor = vec4(color * intensity * vBrightness, intensity);
 }
@@ -122,7 +263,7 @@ export function createNodeMaterial(color: THREE.Color): THREE.ShaderMaterial {
     fragmentShader: nodeFragmentShader,
     uniforms: {
       uTime: { value: 0 },
-      uBrightness: { value: 1.2 }, // Sharp nodes don't need excessive brightness
+      uBrightness: { value: 1.2 },
       uColor: { value: color }
     },
     transparent: true,
@@ -131,14 +272,16 @@ export function createNodeMaterial(color: THREE.Color): THREE.ShaderMaterial {
   });
 }
 
-export function createNodes(
-  count: number,
-  color: THREE.Color
-): { points: THREE.Points; material: THREE.ShaderMaterial; data: NodeData } {
-  const data = createNodeData(count);
-  const geometry = createNodeGeometry(data);
+// ─── Convenience: create everything ──────────────────────────────────────────
+export function createNodes(color: THREE.Color): {
+  points: THREE.Points;
+  material: THREE.ShaderMaterial;
+  system: NodeSystem;
+} {
+  const system = createNodeSystem();
+  const geometry = createNodeGeometry(system);
   const material = createNodeMaterial(color);
   const points = new THREE.Points(geometry, material);
 
-  return { points, material, data };
+  return { points, material, system };
 }

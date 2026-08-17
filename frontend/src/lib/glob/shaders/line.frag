@@ -1,17 +1,20 @@
-// Fragment shader for connection lines — bright electric tendrils
+// Fragment shader for connection lines — activity-driven electric tendrils
 uniform vec3 uColor;
 uniform float uTime;
 
-varying float vAge;
+varying float vActivity;
 
 void main() {
-  // Age-based opacity: new connections bright, old ones fade
-  float ageFade = 1.0 - vAge * 0.5;
+  // Activity drives brightness — not time-based pulsing
+  float intensity = 0.15 + vActivity * 2.5;
   
-  // Pulsing effect — connections should feel alive
-  float pulse = sin(uTime * 2.0 + vAge * 6.28) * 0.15 + 0.85;
+  // Active connections glow brighter
+  vec3 color = uColor * intensity;
   
-  float alpha = ageFade * pulse * 1.2; // Much brighter than before
+  // Active connections shift toward white
+  color = mix(color, vec3(1.0), vActivity * 0.3);
   
-  gl_FragColor = vec4(uColor * 1.5, alpha); // Boost brightness
+  float alpha = clamp(intensity * 0.4, 0.05, 0.8);
+  
+  gl_FragColor = vec4(color, alpha);
 }

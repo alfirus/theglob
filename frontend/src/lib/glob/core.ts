@@ -1,74 +1,29 @@
-import * as THREE from 'three';
+// ─── Core (Neural Nucleus) Utilities ─────────────────────────────────────────
+// The core is NOT a separate mesh — it's dense center nodes in the main node system.
+// This module provides utility functions for core behavior.
 
-// Vertex shader for central core glow
-export const coreVertexShader = `
-uniform float uTime;
-uniform float uPulse;
+// ─── Configuration ───────────────────────────────────────────────────────────
+const HEARTBEAT_PERIOD = 1.6; // seconds per heartbeat cycle
 
-varying vec3 vNormal;
-varying vec3 vViewDir;
+// ─── Heartbeat pulse value (0-1) ────────────────────────────────────────────
+export function getHeartbeat(time: number): number {
+  const cycle = (time % HEARTBEAT_PERIOD) / HEARTBEAT_PERIOD;
 
-void main() {
-  vNormal = normalize(normalMatrix * normal);
-  
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
-  vViewDir = normalize(cameraPosition - worldPos.xyz);
-  
-  // Heartbeat pulse: fast rise, slow fall
-  float heartbeat = pow(max(0.0, sin(uTime * 3.927)), 4.0);
-  float scale = 1.0 + heartbeat * uPulse * 0.08;
-  
-  vec3 pos = position * scale;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  // Double-pulse heartbeat shape
+  let pulse = 0;
+
+  // First beat (fast rise, fast fall)
+  if (cycle < 0.15) {
+    pulse = Math.sin(cycle / 0.15 * Math.PI);
+  }
+  // Second beat (slightly delayed)
+  else if (cycle >= 0.2 && cycle < 0.35) {
+    pulse = Math.sin((cycle - 0.2) / 0.15 * Math.PI) * 0.7;
+  }
+
+  return pulse;
 }
-`;
 
-// Fragment shader for central core glow — bright electric nucleus
-export const coreFragmentShader = `
-uniform vec3 uColor;
-uniform float uTime;
-uniform float uPulse;
-
-varying vec3 vNormal;
-varying vec3 vViewDir;
-
-void main() {
-  float fresnel = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-  fresnel = pow(fresnel, 1.5);
-  
-  float heartbeat = pow(max(0.0, sin(uTime * 3.927)), 3.0);
-  float pulse = 1.0 + heartbeat * uPulse;
-  
-  float coreGlow = 0.5 + fresnel * 0.5;
-  
-  vec3 color = uColor * coreGlow * pulse * 2.5;
-  float alpha = (0.4 + fresnel * 0.6) * pulse;
-  
-  gl_FragColor = vec4(color, alpha);
-}
-`;
-
-export function createCoreGlow(color: THREE.Color): {
-  mesh: THREE.Mesh;
-  material: THREE.ShaderMaterial;
-} {
-  const geometry = new THREE.SphereGeometry(0.65, 32, 32);
-
-  const material = new THREE.ShaderMaterial({
-    vertexShader: coreVertexShader,
-    fragmentShader: coreFragmentShader,
-    uniforms: {
-      uTime: { value: 0 },
-      uPulse: { value: 1.0 },
-      uColor: { value: color }
-    },
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    side: THREE.DoubleSide
-  });
-
-  const mesh = new THREE.Mesh(geometry, material);
-
-  return { mesh, material };
-}
+// ─── Type export (backward compatibility) ────────────────────────────────────
+// CoreGlow is no longer a separate mesh — kept as empty type for imports
+export type CoreGlow = Record<string, never>;

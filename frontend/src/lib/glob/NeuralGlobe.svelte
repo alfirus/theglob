@@ -5,10 +5,18 @@
   import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
   import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
-  import { createNodes, type NodeData } from './nodes';
-  import { createConnections, refreshConnections, type ConnectionSystem } from './connections';
+  // New architecture imports
+  import { createNodes, updateNodes, type NodeSystem } from './nodes';
+  import { createConnections, updateConnectionActivities, type ConnectionSystem } from './connections';
+  import {
+    createSimulation,
+    updateSignals,
+    updateNodeActivities,
+    updateSimulationTimer,
+    pulseCoreNodes,
+    type NeuralSimulation
+  } from './neuralActivity';
   import { createSparkSystem, updateSparks, type SparkSystem } from './sparks';
-  import { createCoreGlow, type CoreGlow } from './core';
   import { createAmbientParticles, updateAmbient, type AmbientSystem } from './ambient';
 
   let container: HTMLDivElement;
@@ -22,26 +30,23 @@
   let clock: THREE.Clock;
 
   // Systems
-  let nodeSystem: { points: THREE.Points; material: THREE.ShaderMaterial; data: NodeData };
+  let nodeSystem: NodeSystem;
+  let nodePoints: THREE.Points;
+  let nodeMaterial: THREE.ShaderMaterial;
   let connectionSystem: ConnectionSystem;
   let sparkSystem: SparkSystem;
-  let coreGlow: CoreGlow;
   let ambientSystem: AmbientSystem;
+  let simulation: NeuralSimulation;
 
   // Globe group for unified rotation
   let globeGroup: THREE.Group;
 
-  // Connection refresh timer
-  let connectionRefreshTimer = 0;
-  const CONNECTION_REFRESH_INTERVAL = 4; // seconds
-
   // Color palette (idle state)
   const COLORS = {
     node: new THREE.Color(0x4488ff),        // Electric blue
-    connection: new THREE.Color(0x4499ee),   // Bright blue — visible electric tendrils
+    connection: new THREE.Color(0x4499ee),   // Bright blue
     sparkCore: new THREE.Color(0xffffff),    // White
     sparkHalo: new THREE.Color(0x88ccff),    // Light blue
-    core: new THREE.Color(0x6699ff),         // Soft blue
     ambient: new THREE.Color(0x335588),      // Very dim blue
     background: 0x000000                    // Pure black
   };
@@ -78,7 +83,7 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
-    renderer.toneMappingExposure = 1.2; // Balanced — not too bright, not too dim
+    renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
 
     // Post-processing
@@ -87,9 +92,9 @@
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.3,   // strength — VERY low. Structure first, glow later.
+      0.3,   // strength — low, structure first
       0.2,   // radius — tight
-      0.5    // threshold — only the VERY brightest elements bloom
+      0.5    // threshold — only brightest bloom
     );
     composer.addPass(bloomPass);
 
@@ -97,23 +102,27 @@
     globeGroup = new THREE.Group();
     scene.add(globeGroup);
 
-    // Create all systems
-    nodeSystem = createNodes(300, COLORS.node);
-    globeGroup.add(nodeSystem.points);
+    // === NEW ARCHITECTURE ===
 
-    connectionSystem = createConnections(
-      nodeSystem.data.positions,
-      nodeSystem.data.count,
-      COLORS.connection
-    );
+    // 1. Create nodes with clustering (includes core nodes)
+    const nodeResult = createNodes(COLORS.node);
+    nodeSystem = nodeResult.system;
+    nodePoints = nodeResult.points;
+    nodeMaterial = nodeResult.material;
+    globeGroup.add(nodePoints);
+
+    // 2. Build persistent connection graph
+    connectionSystem = createConnections(nodeSystem.nodes, COLORS.connection);
     globeGroup.add(connectionSystem.lineSegments);
 
+    // 3. Create spark system (signals follow graph paths)
     sparkSystem = createSparkSystem(COLORS.sparkCore, COLORS.sparkHalo);
     globeGroup.add(sparkSystem.points);
 
-    coreGlow = createCoreGlow(COLORS.core);
-    globeGroup.add(coreGlow.mesh);
+    // 4. Create neural simulation (drives everything)
+    simulation = createSimulation();
 
+    // 5. Create ambient particles (very sparse)
     ambientSystem = createAmbientParticles(COLORS.ambient);
     globeGroup.add(ambientSystem.points);
 
@@ -127,10 +136,8 @@
   function onResize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-
     renderer.setSize(w, h);
     composer.setSize(w, h);
   }
@@ -141,31 +148,48 @@
     const deltaTime = clock.getDelta();
     const elapsed = clock.getElapsedTime();
 
-    // Update node shader time
-    nodeSystem.material.uniforms.uTime.value = elapsed;
+    // === NEURAL SIMULATION (drives everything) ===
 
-    // Update connection shader time
+    // 1. Update simulation timer — triggers events
+    updateSimulationTimer(simulation, nodeSystem.nodes, connectionSystem, deltaTime);
+
+    // 2. Update signals — move along paths, activate nodes/connections
+    updateSignals(simulation, nodeSystem.nodes, connectionSystem, deltaTime);
+
+    // 3. Update node activities — decay, core pulse
+    updateNodeActivities(nodeSystem.nodes, deltaTime);
+    pulseCoreNodes(nodeSystem.nodes, elapsed);
+
+    // 4. Update connection activities — decay
+    updateConnectionActivities(connectionSystem);
+
+    // === RENDER (reads activity values) ===
+
+    // Update node positions and activities from simulation
+    updateNodes(nodeSystem, elapsed);
+    const posAttr = nodePoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+    posAttr.array.set(nodeSystem.positions);
+    posAttr.needsUpdate = true;
+
+    const actAttr = nodePoints.geometry.getAttribute('aActivity') as THREE.BufferAttribute;
+    actAttr.array.set(nodeSystem.activities);
+    actAttr.needsUpdate = true;
+
+    // Update node shader time
+    nodeMaterial.uniforms.uTime.value = elapsed;
+
+    // Update connection shader
     connectionSystem.material.uniforms.uTime.value = elapsed;
 
-    // Update core shader time
-    coreGlow.material.uniforms.uTime.value = elapsed;
-
-    // Update spark system
+    // Update sparks from signals
     updateSparks(
       sparkSystem,
-      connectionSystem.connections,
-      nodeSystem.data.positions,
-      deltaTime,
-      0.3 // spawn interval — faster for more electric activity
+      simulation.signals,
+      nodeSystem.positions,
+      nodeSystem.nodes,
+      deltaTime
     );
     sparkSystem.material.uniforms.uTime.value = elapsed;
-
-    // Refresh connections periodically
-    connectionRefreshTimer += deltaTime;
-    if (connectionRefreshTimer > CONNECTION_REFRESH_INTERVAL) {
-      connectionRefreshTimer = 0;
-      refreshConnections(connectionSystem);
-    }
 
     // Update ambient particles
     updateAmbient(ambientSystem, deltaTime);
