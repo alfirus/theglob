@@ -3,6 +3,7 @@
   import NeuralGlobe from '$lib/glob/NeuralGlobe.svelte';
   import ChatInput from '$lib/ChatInput.svelte';
   import ChatBubble from '$lib/ChatBubble.svelte';
+  import DeviceStats from '$lib/DeviceStats.svelte';
   import type { Message } from '$lib/ChatBubble.svelte';
 
   let showInput = $state(false);
@@ -155,6 +156,9 @@
 
   <!-- Chat input at the BOTTOM CENTER -->
   <ChatInput bind:visible={showInput} on:send={handleSend} />
+
+  <!-- Device stats at the TOP RIGHT -->
+  <DeviceStats />
 {/if}
 
 <style>
