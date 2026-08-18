@@ -4,8 +4,8 @@ import type { NeuralNode } from './nodes';
 // ─── Configuration ───────────────────────────────────────────────────────────
 const MIN_CONNECTIONS_PER_NODE = 3;
 const MAX_CONNECTIONS_PER_NODE = 6;
-const ACTIVITY_DECAY = 0.94;
-const ACTIVITY_BOOST = 1.5; // Active connections glow, but not too much
+const ACTIVITY_DECAY = 0.96;
+const ACTIVITY_BOOST = 2.0;
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface NeuralConnection {
@@ -80,7 +80,7 @@ export function buildGraph(nodes: NeuralNode[]): NeuralConnection[] {
       if (!edgeSet.has(edgeKey)) {
         edgeSet.add(edgeKey);
 
-        const baseIntensity = 0.03 + Math.random() * 0.09; // Very dim by default — only active connections glow
+        const baseIntensity = 0.05 + Math.random() * 0.08;
         connections.push({
           source: node.id,
           target: neighborId,
@@ -199,16 +199,12 @@ uniform float uTime;
 varying float vActivity;
 
 void main() {
-  // Activity drives brightness — not time-based pulsing
-  float intensity = 0.15 + vActivity * 2.5;
+  float intensity = 0.15 + vActivity * 1.5;
   
-  // Active connections glow brighter
   vec3 color = uColor * intensity;
+  color = mix(color, vec3(1.0), vActivity * 0.25);
   
-  // Active connections shift toward white
-  color = mix(color, vec3(1.0), vActivity * 0.3);
-  
-  float alpha = clamp(intensity * 0.4, 0.05, 0.8);
+  float alpha = clamp(intensity * 0.4, 0.05, 0.6);
   
   gl_FragColor = vec4(color, alpha);
 }

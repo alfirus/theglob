@@ -1,15 +1,15 @@
 import * as THREE from 'three';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
-const CLUSTER_COUNT = 12;
-const NODES_PER_CLUSTER = 25;
-const CORE_NODE_COUNT = 30;
+const CLUSTER_COUNT = 18;
+const NODES_PER_CLUSTER = 35;
+const CORE_NODE_COUNT = 50;
 const SPHERE_RADIUS = 1.0;
-const CORE_RADIUS = 0.12;
-const CLUSTER_SPREAD = 0.18; // How spread out each cluster is
-const CLUSTER_JITTER = 0.06; // Random jitter within cluster
+const CORE_RADIUS = 0.15;
+const CLUSTER_SPREAD = 0.15;
+const CLUSTER_JITTER = 0.05;
 
-export const TOTAL_NODE_COUNT = CLUSTER_COUNT * NODES_PER_CLUSTER + CORE_NODE_COUNT; // 330
+export const TOTAL_NODE_COUNT = CLUSTER_COUNT * NODES_PER_CLUSTER + CORE_NODE_COUNT; // 680
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface NeuralNode {
@@ -85,7 +85,7 @@ export function createNodeSystem(): NodeSystem {
       const depthVar = 0.92 + Math.random() * 0.16;
       basePos.multiplyScalar(depthVar);
 
-      const importance = 0.3 + Math.random() * 0.7; // Random importance
+      const importance = 0.5 + Math.random() * 0.5;
       const phase = Math.random() * Math.PI * 2;
 
       nodes.push({
@@ -126,7 +126,7 @@ export function createNodeSystem(): NodeSystem {
       basePosition: basePos.clone(),
       cluster: -1, // Core cluster
       importance,
-      activity: 0.2 + Math.random() * 0.3, // Core starts somewhat active
+      activity: 0.4 + Math.random() * 0.3,
       phase,
       isCore: true
     });
@@ -208,15 +208,13 @@ void main() {
   // Breathing is minimal — driven by position buffer, not shader
   float breathe = sin(uTime * 0.8 + aPhase * 6.2831) * 0.15 + 0.85;
   
-  // INACTIVE nodes are tiny and dim. ACTIVE nodes glow.
-  float activityBoost = 0.15 + aActivity * 5.0; // inactive=0.15, active=5.15
+  float activityBoost = 0.5 + aActivity * 2.0;
   vBrightness = aBrightness * breathe * uBrightness * activityBoost;
   
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   
-  // INACTIVE nodes are tiny dots. ACTIVE nodes are larger.
-  float sizeBase = 1.5 + aActivity * 4.0;
-  gl_PointSize = (sizeBase) * (300.0 / -mvPosition.z);
+  float sizeBase = 1.8 + aActivity * 2.0;
+  gl_PointSize = (sizeBase) * (280.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
@@ -235,10 +233,9 @@ void main() {
   
   if (dist > 0.5) discard;
   
-  // Tight falloff — like the spec: · ●● · pattern
-  float core = smoothstep(0.16, 0.0, dist);
-  float halo = smoothstep(0.30, 0.12, dist);
-  float intensity = core + halo * 0.2;
+  float core = smoothstep(0.08, 0.0, dist);
+  float halo = smoothstep(0.18, 0.05, dist);
+  float intensity = core + halo * 0.08;
   
   // White-hot core for active nodes, colored for resting
   vec3 coreColor = vec3(1.0, 1.0, 1.0);
@@ -263,7 +260,7 @@ export function createNodeMaterial(color: THREE.Color): THREE.ShaderMaterial {
     fragmentShader: nodeFragmentShader,
     uniforms: {
       uTime: { value: 0 },
-      uBrightness: { value: 1.2 },
+      uBrightness: { value: 0.9 },
       uColor: { value: color }
     },
     transparent: true,

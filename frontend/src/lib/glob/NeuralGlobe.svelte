@@ -18,8 +18,9 @@
   } from './neuralActivity';
   import { createSparkSystem, updateSparks, type SparkSystem } from './sparks';
   import { createAmbientParticles, updateAmbient, type AmbientSystem } from './ambient';
+  import { createElectricArcSystem, updateElectricArcs, type ElectricArcSystem } from './electricArcs';
 
-  let { isSpeaking = false }: { isSpeaking?: boolean } = $props();
+  let { isSpeaking = false, isThinking = false }: { isSpeaking?: boolean; isThinking?: boolean } = $props();
 
   let container: HTMLDivElement;
   let animationId: number;
@@ -38,6 +39,7 @@
   let connectionSystem: ConnectionSystem;
   let sparkSystem: SparkSystem;
   let ambientSystem: AmbientSystem;
+  let electricArcSystem: ElectricArcSystem;
   let simulation: NeuralSimulation;
 
   // Globe group for unified rotation
@@ -83,9 +85,9 @@
       alpha: false
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.toneMapping = THREE.ReinhardToneMapping;
-    renderer.toneMappingExposure = 0.8; // Dim overall — only active elements should glow
+    renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
 
     // Post-processing
@@ -94,9 +96,9 @@
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.2,   // strength — very low. Only firing neurons bloom.
-      0.15,  // radius — tight
-      0.6    // threshold — high. Only the brightest elements bloom.
+      0.15,  // strength — very subtle
+      0.1,   // radius — tight
+      0.7    // threshold — only brightest elements
     );
     composer.addPass(bloomPass);
 
@@ -127,6 +129,10 @@
     // 5. Create ambient particles (very sparse)
     ambientSystem = createAmbientParticles(COLORS.ambient);
     globeGroup.add(ambientSystem.points);
+
+    // 6. Create electric arcs between neurons
+    electricArcSystem = createElectricArcSystem(new THREE.Color(0x88ccff));
+    globeGroup.add(electricArcSystem.lineSegments);
 
     // Clock
     clock = new THREE.Clock();
@@ -201,6 +207,10 @@
 
     // Update ambient particles
     updateAmbient(ambientSystem, deltaTime);
+
+    // Update electric arcs
+    const isActive = isSpeaking || isThinking;
+    updateElectricArcs(electricArcSystem, nodeSystem.nodes, deltaTime, isActive);
 
     // Slow rotation of entire globe
     globeGroup.rotation.y += 0.1 * deltaTime;

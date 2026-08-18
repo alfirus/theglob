@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
-const AMBIENT_COUNT = 15;  // Nearly invisible — only noticeable on close look
+const AMBIENT_COUNT = 40;
 const DRIFT_RADIUS = 2.5;
 const VELOCITY_SCALE = 0.02; // Extremely slow movement
 
@@ -36,7 +36,7 @@ export function createAmbientParticles(color: THREE.Color): AmbientSystem {
     color: color,
     size: 0.01,
     transparent: true,
-    opacity: 0.05, // Almost invisible — depth cues only
+    opacity: 0.12,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true

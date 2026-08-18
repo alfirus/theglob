@@ -4,10 +4,10 @@ import type { NeuralConnection, ConnectionSystem } from './connections';
 // ─── Configuration ───────────────────────────────────────────────────────────
 const MIN_PATH_HOPS = 4;
 const MAX_PATH_HOPS = 8;
-const MIN_EVENT_INTERVAL = 0.5; // seconds
-const MAX_EVENT_INTERVAL = 2.0; // seconds
-const NODE_ACTIVITY_DECAY = 0.92;
-const MAX_SIMULTANEOUS_SIGNALS = 8;
+const MIN_EVENT_INTERVAL = 0.2;
+const MAX_EVENT_INTERVAL = 0.8;
+const NODE_ACTIVITY_DECAY = 0.95;
+const MAX_SIMULTANEOUS_SIGNALS = 16;
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 export interface NeuralSignal {
@@ -194,7 +194,7 @@ export function updateNodeActivities(nodes: NeuralNode[], deltaTime: number): vo
 
     // Core nodes maintain some baseline activity
     if (node.isCore) {
-      node.activity = Math.max(node.activity, 0.15);
+      node.activity = Math.max(node.activity, 0.3);
     }
   }
 }
