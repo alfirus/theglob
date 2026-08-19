@@ -83,26 +83,10 @@
     }
   }
 
-  async function handleSelect(providerId: Provider) {
-    selectedProvider = providerId;
-    dispatch('change', providerId);
-    
-    // Check health for this provider
-    await checkProviderHealth(providerId);
-    
-    // Save to localStorage and server API
-    try {
-      const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
-      settings.provider = providerId;
-      settings.systemPrompt = systemPrompt;
-      localStorage.setItem('globe-settings', JSON.stringify(settings));
-      
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-    } catch {}
+  // duplicate handleSelect removed (kept the one above at line 86 with health check logic)
+
+  function toggle() {
+    open = !open;
   }
 
   async function handleSystemPromptChange() {
@@ -176,27 +160,9 @@
     }
   };
 
-  async function handleSelect(providerId: Provider) {
-    selectedProvider = providerId;
-    dispatch('change', providerId);
-    
-    // Save to localStorage and server API
-    try {
-      const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
-      settings.provider = providerId;
-      localStorage.setItem('globe-settings', JSON.stringify(settings));
-      
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-    } catch {}
-  }
-
-  function toggle() {
-    open = !open;
-  }
+  // Provider config defaults — mutated inline for two-way binding
+  const providerDefaults: Record<Provider, ProviderConfig> = { ...providers };
+  let activeProviders = $state(providerDefaults);
 </script>
 
 <!-- Settings Button (bottom right) -->
@@ -252,11 +218,11 @@
 
         <div class="form-group">
           <label>Base URL</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             bind:value={providers[selectedProvider].baseUrl}
             placeholder="e.g., http://localhost:1234/v1"
-            on:change={() => {
+            onChange={() => {
               try {
                 const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
                 settings.configs = settings.configs || {};
@@ -269,11 +235,11 @@
 
         <div class="form-group">
           <label>API Key (optional)</label>
-          <input 
-            type="password" 
+          <input
+            type="password"
             bind:value={providers[selectedProvider].apiKey}
             placeholder="sk-..."
-            on:change={() => {
+            onChange={() => {
               try {
                 const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
                 settings.configs = settings.configs || {};
@@ -286,11 +252,11 @@
 
         <div class="form-group">
           <label>Model</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             bind:value={providers[selectedProvider].model}
             placeholder="e.g., qwen3.6-35b-a3b"
-            on:change={() => {
+            onChange={() => {
               try {
                 const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
                 settings.configs = settings.configs || {};
@@ -308,7 +274,7 @@
             bind:value={systemPrompt}
             placeholder="e.g., You are a helpful AI assistant that speaks in a friendly and concise manner."
             rows="4"
-            on:change={handleSystemPromptChange}
+            onChange={handleSystemPromptChange}
           ></textarea>
         </div>
 

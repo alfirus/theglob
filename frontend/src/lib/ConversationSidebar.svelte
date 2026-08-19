@@ -2,11 +2,15 @@
   import { onMount } from 'svelte';
   import type { Conversation } from '$lib/db';
 
-  export let conversations: Conversation[] = [];
-  export let activeId: string | null = $state(null);
-  export let onSelect: (id: string) => void = () => {};
-  export let onNew: () => void = () => {};
-  export let onDelete: (id: string) => void = () => {};
+  interface ConversationSidebarProps {
+    conversations?: Conversation[];
+    activeId?: string | null;
+    onSelect?: (id: string) => void;
+    onNew?: () => void;
+    onDelete?: (id: string) => void;
+  }
+
+  let { conversations = [], activeId = null, onSelect = () => {}, onNew = () => {}, onDelete = () => {} }: ConversationSidebarProps = $props();
 
   let showDeleteConfirm = $state<string | null>(null);
 
