@@ -186,11 +186,32 @@
     // Update node shader time
     nodeMaterial.uniforms.uTime.value = elapsed;
 
-    // Speaking state: shift node color to warm amber
+    // Speaking/thinking state: shift node color to warm amber
     const targetColor = isSpeaking
       ? new THREE.Color(0xddaa44) // Warm amber when speaking
       : COLORS.node; // Electric blue when idle
     nodeMaterial.uniforms.uColor.value.lerp(targetColor, 0.05);
+
+    // Thinking/streaming state: increase bloom intensity for pulse effect
+    if (isThinking && !isSpeaking) {
+      const pulse = Math.sin(elapsed * 4) * 0.1 + 0.2;
+      bloomPass.strength = pulse;
+    } else {
+      bloomPass.strength = 0.15; // Default subtle bloom
+    }
+
+    // Thinking state: increase spark emission rate via uniform
+    if (isThinking || isSpeaking) {
+      nodeMaterial.uniforms.uActivityBoost.value = Math.min(
+        nodeMaterial.uniforms.uActivityBoost.value + deltaTime * 2, 
+        1.0
+      );
+    } else {
+      nodeMaterial.uniforms.uActivityBoost.value = Math.max(
+        nodeMaterial.uniforms.uActivityBoost.value - deltaTime * 3, 
+        0.0
+      );
+    }
 
     // Update connection shader
     connectionSystem.material.uniforms.uTime.value = elapsed;

@@ -24,11 +24,106 @@
   let { initialProvider = 'hermes' }: { initialProvider?: Provider } = $props();
   let selectedProvider = $state<Provider>(initialProvider as Provider);
 
+  // System prompt state
+  let systemPrompt = $state('');
+  
   // Load from localStorage on init
   try {
     const saved = JSON.parse(localStorage.getItem('globe-settings') || '{}');
     if (saved.provider) selectedProvider = saved.provider;
+    if (saved.systemPrompt) systemPrompt = saved.systemPrompt;
   } catch {}
+
+  // Provider health state
+  let providerHealth: Record<string, { status: 'unknown' | 'healthy' | 'unhealthy'; lastChecked?: number }> = {};
+
+  async function checkProviderHealth(providerId: Provider) {
+    const config = providers[providerId];
+    if (!config.baseUrl) {
+      providerHealth[providerId] = { status: 'unhealthy', lastChecked: Date.now() };
+      return;
+    }
+
+    try {
+      // Try common health endpoints
+      const urls = [
+        `${config.baseUrl}/health`,
+        `${config.baseUrl}/v1/models`
+      ];
+
+      let healthy = false;
+      for (const url of urls) {
+        try {
+          const response = await fetch(url, { 
+            method: 'GET',
+            headers: config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {},
+            signal: AbortSignal.timeout(3000)
+          });
+          if (response.ok || response.status === 200) {
+            healthy = true;
+            break;
+          }
+        } catch {}
+      }
+
+      providerHealth[providerId] = { 
+        status: healthy ? 'healthy' : 'unhealthy', 
+        lastChecked: Date.now() 
+      };
+    } catch {
+      providerHealth[providerId] = { status: 'unhealthy', lastChecked: Date.now() };
+    }
+  }
+
+  function getHealthBadge(status: string): string {
+    switch (status) {
+      case 'healthy': return '🟢';
+      case 'unhealthy': return '🔴';
+      default: return '⚪';
+    }
+  }
+
+  async function handleSelect(providerId: Provider) {
+    selectedProvider = providerId;
+    dispatch('change', providerId);
+    
+    // Check health for this provider
+    await checkProviderHealth(providerId);
+    
+    // Save to localStorage and server API
+    try {
+      const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
+      settings.provider = providerId;
+      settings.systemPrompt = systemPrompt;
+      localStorage.setItem('globe-settings', JSON.stringify(settings));
+      
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+    } catch {}
+  }
+
+  async function handleSystemPromptChange() {
+    try {
+      const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
+      settings.systemPrompt = systemPrompt;
+      localStorage.setItem('globe-settings', JSON.stringify(settings));
+      
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+    } catch {}
+  }
+
+  async function handleHealthCheck() {
+    if (selectedProvider && providers[selectedProvider]) {
+      await checkProviderHealth(selectedProvider);
+    }
+  }
 
   const providers: Record<Provider, ProviderConfig> = {
     hermes: {
@@ -143,6 +238,18 @@
       <div class="config-section">
         <h3>Configure: {providers[selectedProvider].name}</h3>
         
+        <!-- Health Status -->
+        <div class="health-status">
+          <span class="health-label">Connection Status:</span>
+          <span class="health-badge">{getHealthBadge(providerHealth[selectedProvider]?.status || 'unknown')}</span>
+          {#if providerHealth[selectedProvider]?.lastChecked}
+            <small>{new Date(providerHealth[selectedProvider].lastChecked).toLocaleTimeString()}</small>
+          {/if}
+          <button class="check-health-btn" onclick={handleHealthCheck}>
+            Check Connection
+          </button>
+        </div>
+
         <div class="form-group">
           <label>Base URL</label>
           <input 
@@ -192,6 +299,17 @@
               } catch {}
             }}
           />
+        </div>
+
+        <!-- System Prompt -->
+        <div class="form-group">
+          <label>System Prompt (Optional)</label>
+          <textarea 
+            bind:value={systemPrompt}
+            placeholder="e.g., You are a helpful AI assistant that speaks in a friendly and concise manner."
+            rows="4"
+            on:change={handleSystemPromptChange}
+          ></textarea>
         </div>
 
         <button class="save-btn" onclick={toggle}>Save & Close</button>
@@ -383,6 +501,75 @@
 
   .form-group input::placeholder {
     color: rgba(136, 170, 255, 0.4);
+  }
+
+  .form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(68, 136, 255, 0.3);
+    border-radius: 8px;
+    color: #e0e8ff;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+  }
+
+  .form-group textarea:focus {
+    border-color: #4488ff;
+    box-shadow: 0 0 10px rgba(68, 136, 255, 0.3);
+  }
+
+  .form-group textarea::placeholder {
+    color: rgba(136, 170, 255, 0.4);
+  }
+
+  /* Health Status */
+  .health-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(68, 136, 255, 0.05);
+    border: 1px solid rgba(68, 136, 255, 0.15);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .health-label {
+    font-size: 13px;
+    color: #8899bb;
+    font-weight: 500;
+  }
+
+  .health-badge {
+    font-size: 16px;
+  }
+
+  .health-status small {
+    font-size: 11px;
+    color: #667799;
+  }
+
+  .check-health-btn {
+    margin-left: auto;
+    padding: 6px 12px;
+    background: rgba(68, 136, 255, 0.1);
+    border: 1px solid rgba(68, 136, 255, 0.3);
+    border-radius: 6px;
+    color: #4488ff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .check-health-btn:hover {
+    background: rgba(68, 136, 255, 0.2);
+    border-color: #4488ff;
   }
 
   .save-btn {

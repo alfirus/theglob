@@ -1,12 +1,97 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  let { visible = $bindable(false) }: { visible?: boolean } = $props();
+  let { visible = $bindable(false), onVoice }: { 
+    visible?: boolean; 
+    onVoice?: (text: string) => void;
+  } = $props();
 
   const dispatch = createEventDispatcher<{ send: string }>();
 
   let input = $state('');
   let inputEl: HTMLInputElement;
+  
+  // Voice recognition state
+  let isListening = $state(false);
+  let recognition: any = null;
+  let voiceText = $state('');
+  let hasVoiceSupport = $state(false);
+
+  // Check for Speech Recognition support
+  if (typeof window !== 'undefined') {
+    const SpeechRecognition = 
+      (window as any).SpeechRecognition || 
+      (window as any).webkitSpeechRecognition;
+    
+    if (SpeechRecognition) {
+      hasVoiceSupport = true;
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        voiceText = transcript;
+        
+        // If final result, send it
+        if (event.results[event.results.length - 1].isFinal) {
+          const finalText = transcript.trim();
+          if (finalText) {
+            dispatch('send', finalText);
+            input = '';
+            voiceText = '';
+            isListening = false;
+            
+            // Call parent handler if provided
+            if (onVoice) {
+              onVoice(finalText);
+            }
+          }
+        }
+      };
+
+      recognition.onerror = () => {
+        isListening = false;
+        voiceText = '';
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        voiceText = '';
+      };
+    }
+  }
+
+  function startListening() {
+    if (recognition && !isListening) {
+      try {
+        recognition.start();
+        isListening = true;
+      } catch (err) {
+        console.error('Speech recognition error:', err);
+      }
+    }
+  }
+
+  function stopListening() {
+    if (recognition && isListening) {
+      recognition.stop();
+      isListening = false;
+      voiceText = '';
+    }
+  }
+
+  function toggleVoice() {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && input.trim()) {
@@ -45,14 +130,45 @@
   <div class="backdrop" onclick={handleBackdropClick}></div>
   <div class="chat-input-container">
     <div class="chat-input-wrapper">
+      {#if hasVoiceSupport}
+        <button 
+          class="voice-btn {isListening ? 'listening' : ''}" 
+          onclick={toggleVoice}
+          title={isListening ? 'Stop listening...' : 'Voice input'}
+        >
+          {#if isListening}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          {:else}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          {/if}
+        </button>
+      {/if}
+
       <input
         bind:this={inputEl}
         bind:value={input}
         onkeydown={handleKeydown}
         type="text"
-        placeholder="Ask the glob something..."
+        placeholder={isListening ? 'Listening...' : 'Ask the glob something...'}
         class="chat-input"
       />
+      
+      {#if voiceText && isListening}
+        <div class="voice-preview">
+          "{voiceText}"
+        </div>
+      {/if}
+
       <button class="send-btn" onclick={handleSend} disabled={!input.trim()}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" />
@@ -78,7 +194,7 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 100;
-    width: 380px;
+    width: min(600px, calc(100vw - 320px));
     animation: slideUp 0.2s ease-out;
   }
 
@@ -89,11 +205,56 @@
     background: rgba(10, 15, 30, 0.85);
     border: 1px solid rgba(68, 136, 255, 0.3);
     border-radius: 16px;
-    padding: 6px 8px 6px 16px;
+    padding: 6px 8px 6px 12px;
     backdrop-filter: blur(12px);
     box-shadow:
       0 0 20px rgba(68, 136, 255, 0.15),
       inset 0 0 20px rgba(68, 136, 255, 0.05);
+  }
+
+  .voice-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(68, 136, 255, 0.1);
+    border: 1px solid rgba(68, 136, 255, 0.3);
+    color: #4488ff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .voice-btn:hover {
+    background: rgba(68, 136, 255, 0.2);
+    border-color: #4488ff;
+  }
+
+  .voice-btn.listening {
+    background: rgba(255, 107, 107, 0.2);
+    border-color: #ff6b6b;
+    color: #ff6b6b;
+    animation: pulse-listen 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-listen {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+  }
+
+  .voice-preview {
+    font-size: 13px;
+    color: #4ade80;
+    padding: 4px 8px;
+    background: rgba(74, 222, 128, 0.1);
+    border-radius: 6px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .chat-input {
@@ -122,6 +283,7 @@
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
+    flex-shrink: 0;
   }
 
   .send-btn:hover:not(:disabled) {

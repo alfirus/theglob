@@ -2,6 +2,7 @@
 // Pattern: · ●● ·  (tight core, minimal halo)
 uniform vec3 uColor;
 uniform float uTime;
+uniform float uActivityBoost;
 
 varying float vBrightness;
 varying float vPhase;
@@ -32,5 +33,8 @@ void main() {
   // Activity makes nodes brighter and more white
   color = mix(color, vec3(1.0), vActivity * 0.4);
   
-  gl_FragColor = vec4(color * intensity * vBrightness, intensity);
+  // Activity boost amplifies brightness during thinking/streaming
+  float boostMultiplier = 1.0 + uActivityBoost * 2.0;
+  
+  gl_FragColor = vec4(color * intensity * vBrightness * boostMultiplier, intensity);
 }

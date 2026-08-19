@@ -117,7 +117,7 @@ async function callProvider(
 }
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { message } = await request.json();
+  const { message, systemPrompt } = await request.json();
 
   if (!message || typeof message !== 'string') {
     return json({ error: 'Message is required' }, { status: 400 });
@@ -150,7 +150,15 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 
   try {
-    const messages = [{ role: 'user', content: message }];
+    // Build messages array with system prompt
+    const messages: Array<{ role: string; content: string }> = [];
+    
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    
+    messages.push({ role: 'user', content: message });
+    
     return await callProvider(config.baseUrl, config.apiKey, config.model, messages);
   } catch (err) {
     console.error('Chat error:', err);
