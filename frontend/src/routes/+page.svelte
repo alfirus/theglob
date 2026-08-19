@@ -1,127 +1,142 @@
-<script lang="ts">
-  import { browser } from '$app/environment';
-  import NeuralGlobe from '$lib/glob/NeuralGlobe.svelte';
-  import ChatInput from '$lib/ChatInput.svelte';
-  import ChatBubble from '$lib/ChatBubble.svelte';
-  import DeviceStats from '$lib/DeviceStats.svelte';
-  import type { Message } from '$lib/ChatBubble.svelte';
+import { browser } from '$app/environment';
+import NeuralGlobe from '$lib/glob/NeuralGlobe.svelte';
+import ChatInput from '$lib/ChatInput.svelte';
+import ChatBubble from '$lib/ChatBubble.svelte';
+import DeviceStats from '$lib/DeviceStats.svelte';
+import Settings from '$lib/Settings.svelte';
+import type { Message } from '$lib/ChatBubble.svelte';
 
-  let showInput = $state(false);
-  let messages: Message[] = $state([]);
-  let isThinking = $state(false);
-  let isSpeaking = $state(false);
-  let currentAudio: HTMLAudioElement | null = null;
+let showInput = $state(false);
+let messages: Message[] = $state([]);
+let isThinking = $state(false);
+let isSpeaking = $state(false);
+let currentAudio: HTMLAudioElement | null = null;
+let selectedProvider = $state<string>('hermes');
 
-  function handleGlobeClick() {
-    showInput = true;
+function handleGlobeClick() {
+  showInput = true;
+}
+
+async function speak(text: string) {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  isSpeaking = true;
+
+  try {
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+
+    if (!response.ok) throw new Error('TTS failed');
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+
+    audio.onended = () => {
+      isSpeaking = false;
+      currentAudio = null;
+      URL.revokeObjectURL(url);
+    };
+
+    audio.onerror = () => {
+      isSpeaking = false;
+      currentAudio = null;
+      URL.revokeObjectURL(url);
+    };
+
+    await audio.play();
+  } catch (err) {
+    console.error('Piper TTS error:', err);
+    isSpeaking = false;
+  }
+}
+
+async function handleSend(e: CustomEvent<string>) {
+  const text = e.detail;
+  messages = [...messages, { role: 'user', text }];
+  isThinking = true;
+
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+    isSpeaking = false;
   }
 
-  async function speak(text: string) {
-    // Stop any ongoing speech
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio = null;
-    }
-    isSpeaking = true;
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Provider': selectedProvider
+      },
+      body: JSON.stringify({ message: text })
+    });
 
-    try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      if (!response.ok) throw new Error('TTS failed');
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let assistantText = '';
+    let buffer = '';
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      currentAudio = audio;
+    messages = [...messages, { role: 'assistant', text: '' }];
 
-      audio.onended = () => {
-        isSpeaking = false;
-        currentAudio = null;
-        URL.revokeObjectURL(url);
-      };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      audio.onerror = () => {
-        isSpeaking = false;
-        currentAudio = null;
-        URL.revokeObjectURL(url);
-      };
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-      await audio.play();
-    } catch (err) {
-      console.error('Piper TTS error:', err);
-      isSpeaking = false;
-    }
-  }
-
-  async function handleSend(e: CustomEvent<string>) {
-    const text = e.detail;
-    messages = [...messages, { role: 'user', text }];
-    isThinking = true;
-
-    // Stop any ongoing speech
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio = null;
-      isSpeaking = false;
-    }
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
-      let buffer = '';
-
-      messages = [...messages, { role: 'assistant', text: '' }];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') break;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.content) {
-                assistantText += parsed.content;
-                messages = [...messages.slice(0, -1), { role: 'assistant', text: assistantText }];
-              }
-            } catch { /* skip */ }
-          }
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) {
+              assistantText += parsed.content;
+              messages = [...messages.slice(0, -1), { role: 'assistant', text: assistantText }];
+            }
+          } catch { /* skip */ }
         }
       }
-
-      // Speak with Piper TTS after streaming completes
-      if (assistantText) {
-        speak(assistantText);
-      }
-    } catch (err) {
-      console.error('Chat error:', err);
-      messages = [...messages.slice(0, -1), {
-        role: 'assistant',
-        text: '⚠️ Cannot connect to Hermes Agent. Make sure the API server is running.'
-      }];
-    } finally {
-      isThinking = false;
     }
+
+    if (assistantText) {
+      speak(assistantText);
+    }
+  } catch (err) {
+    console.error('Chat error:', err);
+    messages = [...messages.slice(0, -1), {
+      role: 'assistant',
+      text: `⚠️ Cannot connect to ${selectedProvider}. Check settings.`
+    }];
+  } finally {
+    isThinking = false;
   }
+}
+
+function handleProviderChange(providerId: string) {
+  selectedProvider = providerId;
+}
+
+// Load saved provider from localStorage on mount
+if (browser) {
+  try {
+    const settings = JSON.parse(localStorage.getItem('globe-settings') || '{}');
+    if (settings.provider) {
+      selectedProvider = settings.provider;
+    }
+  } catch {}
+}
 </script>
 
 <svelte:head>
@@ -159,6 +174,9 @@
 
   <!-- Device stats at the TOP RIGHT -->
   <DeviceStats />
+
+  <!-- Settings button at bottom right -->
+  <Settings on:change={handleProviderChange} initialProvider={selectedProvider} />
 {/if}
 
 <style>
